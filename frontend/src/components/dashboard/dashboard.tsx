@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { issuesApi } from '@/lib/api';
-import type { Issue } from '@/types';
+import type { Issue } from '@/types';      
 import { KanbanBoard } from '@/components/kanban/kanban-board';
 import { IssueModal } from '@/components/issues/issue-modal';
 import { Button } from '@/components/ui/button';

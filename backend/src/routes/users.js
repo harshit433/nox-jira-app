@@ -1,22 +1,25 @@
 import { Router } from 'express';
+import { User } from '../models/User.js';
 import { requireAuth } from '../middleware/auth.js';
-import { getUsers } from '../storage/storage.js';
 
 const router = Router();
 router.use(requireAuth);
 
-router.get('/', async (req, res) => {
+router.get('/', async (req, res, next) => {
   try {
-    const users = await getUsers();
-    const publicUsers = users.map(({ passwordHash, ...u }) => ({
-      id: u.id,
+    const users = await User.find()
+      .select('email name')
+      .lean();
+
+    const formatted = users.map((u) => ({
+      id: u._id.toString(),
       email: u.email,
       name: u.name,
     }));
-    res.json(publicUsers);
+
+    res.json(formatted);
   } catch (err) {
-    console.error('Get users error:', err);
-    res.status(500).json({ error: 'Failed to fetch users' });
+    next(err);
   }
 });
 

@@ -9,14 +9,16 @@ A production-grade Jira clone with Kanban board view, built with Next.js (fronte
 - **Issue Details** - Title, description, assignee (email), owner (created by), comments with timestamps
 - **Auth** - Sign up and sign in flow with session-based authentication
 - **Premium Black/White Theme** - Professional, minimal design
+- **MongoDB** - Persistent storage with Mongoose schemas
+- **Logging & Error Handling** - Winston logger, centralized error handling
 
 ## Tech Stack
 
 - **Frontend**: Next.js 16, TypeScript, Tailwind CSS
-- **Backend**: Node.js, Express
-- **Storage**: JSON file storage (local)
+- **Backend**: Node.js, Express, Mongoose
+- **Database**: MongoDB
 
-## Hardcoded Users (for testing)
+## Hardcoded Users (seeded for testing)
 
 | Email        | Password |
 | ------------ | -------- |
@@ -30,6 +32,7 @@ A production-grade Jira clone with Kanban board view, built with Next.js (fronte
 ### Prerequisites
 
 - Node.js 18+
+- MongoDB (local or Atlas)
 - npm
 
 ### Backend
@@ -37,6 +40,26 @@ A production-grade Jira clone with Kanban board view, built with Next.js (fronte
 ```bash
 cd backend
 npm install
+```
+
+Set environment variables (optional):
+
+```bash
+# .env
+MONGODB_URI=mongodb://localhost:27017/nox-jira
+PORT=4000
+LOG_LEVEL=info
+```
+
+Seed hardcoded users:
+
+```bash
+npm run seed
+```
+
+Start the server:
+
+```bash
 npm run dev
 ```
 
@@ -66,19 +89,21 @@ NEXT_PUBLIC_API_URL=http://localhost:4000/api
 nox-jira-app/
 ├── backend/
 │   ├── src/
-│   │   ├── config/       # Constants, hardcoded users
-│   │   ├── middleware/   # Auth middleware
-│   │   ├── routes/       # Auth, issues, users
-│   │   ├── storage/      # JSON file storage
-│   │   └── index.js
-│   └── data/             # Generated at runtime (users, issues, sessions)
+│   │   ├── config/         # Constants, hardcoded users
+│   │   ├── db/             # MongoDB connection
+│   │   ├── lib/            # Logger, custom errors
+│   │   ├── middleware/     # Auth, error handler
+│   │   ├── models/         # User, Session, Issue, Comment schemas
+│   │   ├── routes/         # Auth, issues, users
+│   │   └── scripts/        # Seed script
+│   └── package.json
 └── frontend/
     └── src/
-        ├── app/          # Next.js App Router pages
-        ├── components/    # UI, auth, kanban, issues
-        ├── contexts/     # Auth context
-        ├── lib/          # API client, constants
-        └── types/        # TypeScript types
+        ├── app/            # Next.js App Router pages
+        ├── components/     # UI, auth, kanban, issues
+        ├── contexts/       # Auth context
+        ├── lib/            # API client, constants
+        └── types/          # TypeScript types
 ```
 
 ## API Endpoints
@@ -100,3 +125,24 @@ nox-jira-app/
 
 ### Users
 - `GET /api/users` - List users (for assignee dropdown)
+
+### MCP Server
+- `POST /mcp` - Model Context Protocol endpoint for AI/LLM tool integration
+
+**MCP Tools:**
+- `fetch_issues` - Fetch all issues (optional status filter)
+- `get_issue` - Get a single issue by ID
+- `modify_issue` - Update issue (title, description, assignee, status)
+- `add_comment` - Add a comment to an issue
+- `create_issue` - Create a new issue
+
+Configure in Cursor (`.cursor/mcp.json`):
+```json
+{
+  "mcpServers": {
+    "nox-jira": {
+      "url": "http://localhost:4000/mcp"
+    }
+  }
+}
+```

@@ -1,3 +1,4 @@
 export { Button } from './button';
 export { Input } from './input';
 export { Card, CardHeader, CardContent } from './card';
+export { Modal } from './modal';

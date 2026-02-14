@@ -5,7 +5,7 @@ import type { Issue, CreateIssueInput } from '@/types';
 import { issuesApi, usersApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardHeader, CardContent } from '@/components/ui/card';
+import { Modal } from '@/components/ui/modal';
 
 interface IssueModalProps {
   issue?: Issue | null;
@@ -129,23 +129,11 @@ export function IssueModal({
     updatedAt: '',
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <Card className="w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <h2 className="text-lg font-semibold">
-            {isCreate ? 'Create issue' : isEdit ? 'Edit issue' : displayIssue.uniqueId}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-neutral-500 hover:text-neutral-700 text-2xl leading-none"
-          >
-            ×
-          </button>
-        </CardHeader>
+  const modalTitle =
+    isCreate ? 'Create issue' : isEdit ? 'Edit issue' : displayIssue.uniqueId;
 
-        <CardContent className="flex-1 overflow-y-auto">
+  return (
+    <Modal open={true} title={modalTitle} onClose={onClose}>
           {error && (
             <div className="mb-4 p-3 rounded-md bg-red-50 text-red-700 text-sm">
               {error}
@@ -299,8 +287,6 @@ export function IssueModal({
               </div>
             </>
           )}
-        </CardContent>
-      </Card>
-    </div>
+    </Modal>
   );
 }

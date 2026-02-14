@@ -1,57 +1,92 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import mongoose from 'mongoose';
 import { requireAuth } from '../middleware/auth.js';
-import { getIssues, saveIssues } from '../storage/storage.js';
+import { Issue } from '../models/Issue.js';
+import { logger } from '../lib/logger.js';
+import { NotFoundError, ValidationError } from '../lib/errors.js';
 import { ISSUE_STATUSES } from '../config/constants.js';
 
 const router = Router();
 router.use(requireAuth);
 
-function generateIssueId() {
+async function generateUniqueId() {
   const prefix = 'NOX';
-  const num = Math.floor(1000 + Math.random() * 9000);
-  return `${prefix}-${num}`;
+  let attempts = 0;
+  const maxAttempts = 10;
+
+  while (attempts < maxAttempts) {
+    const num = Math.floor(1000 + Math.random() * 9000);
+    const uniqueId = `${prefix}-${num}`;
+    const existing = await Issue.findOne({ uniqueId });
+    if (!existing) return uniqueId;
+    attempts++;
+  }
+
+  return `${prefix}-${Date.now().toString(36).slice(-4)}`;
 }
 
-router.get('/', async (req, res) => {
+router.get('/', async (req, res, next) => {
   try {
-    const issues = await getIssues();
-    res.json(issues);
+    const issues = await Issue.find().sort({ updatedAt: -1 }).lean();
+    const formatted = issues.map((i) => ({
+      ...i,
+      id: i._id.toString(),
+      createdAt: i.createdAt?.toISOString?.(),
+      updatedAt: i.updatedAt?.toISOString?.(),
+      comments: (i.comments || []).map((c) => ({
+        ...c,
+        id: c._id?.toString?.(),
+        timestamp: c.timestamp?.toISOString?.(),
+      })),
+    }));
+    res.json(formatted);
   } catch (err) {
-    console.error('Get issues error:', err);
-    res.status(500).json({ error: 'Failed to fetch issues' });
+    next(err);
   }
 });
 
-router.get('/:id', async (req, res) => {
+router.get('/:id', async (req, res, next) => {
   try {
-    const issues = await getIssues();
-    const issue = issues.find((i) => i.id === req.params.id);
-
-    if (!issue) {
-      return res.status(404).json({ error: 'Issue not found' });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      throw new NotFoundError('Issue');
     }
 
-    res.json(issue);
+    const issue = await Issue.findById(req.params.id).lean();
+
+    if (!issue) {
+      throw new NotFoundError('Issue');
+    }
+
+    const formatted = {
+      ...issue,
+      id: issue._id.toString(),
+      createdAt: issue.createdAt?.toISOString?.(),
+      updatedAt: issue.updatedAt?.toISOString?.(),
+      comments: (issue.comments || []).map((c) => ({
+        ...c,
+        id: c._id?.toString?.(),
+        timestamp: c.timestamp?.toISOString?.(),
+      })),
+    };
+
+    res.json(formatted);
   } catch (err) {
-    console.error('Get issue error:', err);
-    res.status(500).json({ error: 'Failed to fetch issue' });
+    next(err);
   }
 });
 
-router.post('/', async (req, res) => {
+router.post('/', async (req, res, next) => {
   try {
     const { title, description, assignee, status } = req.body;
 
     if (!title || !title.trim()) {
-      return res.status(400).json({ error: 'Title is required' });
+      throw new ValidationError('Title is required');
     }
 
-    const issues = await getIssues();
-    const uniqueId = generateIssueId();
+    const uniqueId = await generateUniqueId();
 
-    const newIssue = {
-      id: `issue-${uuidv4()}`,
+    const issue = await Issue.create({
       uniqueId,
       title: title.trim(),
       description: (description || '').trim(),
@@ -59,31 +94,34 @@ router.post('/', async (req, res) => {
       owner: req.user.email,
       status: ISSUE_STATUSES.includes(status) ? status : 'todo',
       comments: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    });
 
-    issues.push(newIssue);
-    await saveIssues(issues);
+    logger.info('Issue created', {
+      issueId: issue._id.toString(),
+      uniqueId: issue.uniqueId,
+      owner: req.user.email,
+    });
 
-    res.status(201).json(newIssue);
+    const doc = issue.toJSON();
+    res.status(201).json(doc);
   } catch (err) {
-    console.error('Create issue error:', err);
-    res.status(500).json({ error: 'Failed to create issue' });
+    next(err);
   }
 });
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', async (req, res, next) => {
   try {
     const { title, description, assignee, status } = req.body;
-    const issues = await getIssues();
-    const index = issues.findIndex((i) => i.id === req.params.id);
 
-    if (index === -1) {
-      return res.status(404).json({ error: 'Issue not found' });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      throw new NotFoundError('Issue');
     }
 
-    const issue = issues[index];
+    const issue = await Issue.findById(req.params.id);
+
+    if (!issue) {
+      throw new NotFoundError('Issue');
+    }
 
     if (title !== undefined) issue.title = title.trim();
     if (description !== undefined) issue.description = description.trim();
@@ -92,91 +130,114 @@ router.put('/:id', async (req, res) => {
       issue.status = status;
     }
 
-    issue.updatedAt = new Date().toISOString();
-    await saveIssues(issues);
+    await issue.save();
 
-    res.json(issue);
+    logger.info('Issue updated', { issueId: issue._id.toString(), uniqueId: issue.uniqueId });
+
+    res.json(issue.toJSON());
   } catch (err) {
-    console.error('Update issue error:', err);
-    res.status(500).json({ error: 'Failed to update issue' });
+    next(err);
   }
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', async (req, res, next) => {
   try {
-    const issues = await getIssues();
-    const filtered = issues.filter((i) => i.id !== req.params.id);
-
-    if (filtered.length === issues.length) {
-      return res.status(404).json({ error: 'Issue not found' });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      throw new NotFoundError('Issue');
     }
 
-    await saveIssues(filtered);
+    const result = await Issue.findByIdAndDelete(req.params.id);
+
+    if (!result) {
+      throw new NotFoundError('Issue');
+    }
+
+    logger.info('Issue deleted', { issueId: req.params.id });
+
     res.json({ success: true });
   } catch (err) {
-    console.error('Delete issue error:', err);
-    res.status(500).json({ error: 'Failed to delete issue' });
+    next(err);
   }
 });
 
-router.post('/:id/comments', async (req, res) => {
+router.post('/:id/comments', async (req, res, next) => {
   try {
     const { text } = req.body;
 
     if (!text || !text.trim()) {
-      return res.status(400).json({ error: 'Comment text is required' });
+      throw new ValidationError('Comment text is required');
     }
 
-    const issues = await getIssues();
-    const index = issues.findIndex((i) => i.id === req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      throw new NotFoundError('Issue');
+    }
 
-    if (index === -1) {
-      return res.status(404).json({ error: 'Issue not found' });
+    const issue = await Issue.findById(req.params.id);
+
+    if (!issue) {
+      throw new NotFoundError('Issue');
     }
 
     const comment = {
-      id: `comment-${uuidv4()}`,
+      _id: new mongoose.Types.ObjectId(),
       text: text.trim(),
       authorEmail: req.user.email,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(),
     };
 
-    issues[index].comments.push(comment);
-    issues[index].updatedAt = new Date().toISOString();
-    await saveIssues(issues);
+    issue.comments.push(comment);
+    await issue.save();
 
-    res.status(201).json(comment);
+    logger.info('Comment added', {
+      issueId: issue._id.toString(),
+      commentId: comment._id.toString(),
+    });
+
+    res.status(201).json({
+      id: comment._id.toString(),
+      text: comment.text,
+      authorEmail: comment.authorEmail,
+      timestamp: comment.timestamp.toISOString(),
+    });
   } catch (err) {
-    console.error('Add comment error:', err);
-    res.status(500).json({ error: 'Failed to add comment' });
+    next(err);
   }
 });
 
-router.delete('/:id/comments/:commentId', async (req, res) => {
+router.delete('/:id/comments/:commentId', async (req, res, next) => {
   try {
-    const issues = await getIssues();
-    const index = issues.findIndex((i) => i.id === req.params.id);
+    const { id, commentId } = req.params;
 
-    if (index === -1) {
-      return res.status(404).json({ error: 'Issue not found' });
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw new NotFoundError('Issue');
     }
 
-    const commentIndex = issues[index].comments.findIndex(
-      (c) => c.id === req.params.commentId
+    if (!mongoose.Types.ObjectId.isValid(commentId)) {
+      throw new NotFoundError('Comment');
+    }
+
+    const issue = await Issue.findById(id);
+
+    if (!issue) {
+      throw new NotFoundError('Issue');
+    }
+
+    const commentIndex = issue.comments.findIndex(
+      (c) => c._id.toString() === commentId
     );
 
     if (commentIndex === -1) {
-      return res.status(404).json({ error: 'Comment not found' });
+      throw new NotFoundError('Comment');
     }
 
-    issues[index].comments.splice(commentIndex, 1);
-    issues[index].updatedAt = new Date().toISOString();
-    await saveIssues(issues);
+    issue.comments.splice(commentIndex, 1);
+    await issue.save();
+
+    logger.info('Comment deleted', { issueId: id, commentId });
 
     res.json({ success: true });
   } catch (err) {
-    console.error('Delete comment error:', err);
-    res.status(500).json({ error: 'Failed to delete comment' });
+    next(err);
   }
 });
 
